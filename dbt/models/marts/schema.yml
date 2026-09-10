@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: mart_perf_by_model
+    columns:
+      - name: model
+        tests: [not_null, unique]
+      - name: n_answers
+        tests: [not_null]
+      - name: accuracy_pct
+        tests: [not_null]
+
+  - name: mart_perf_by_prompt
+    columns:
+      - name: model
+        tests: [not_null]
+      - name: prompt_variant
+        tests: [not_null]
+      - name: accuracy_pct
+        tests: [not_null]
+
+  - name: mart_perf_by_category
+    columns:
+      - name: model
+        tests: [not_null]
+      - name: category
+        tests: [not_null]
+
+  - name: mart_perf_by_difficulty
+    columns:
+      - name: model
+        tests: [not_null]
+      - name: difficulty
+        tests: [not_null]
+
+  - name: mart_coverage
+    description: Couverture questions silver vs answers disponibles (utile si le run IA est partiel)
+    columns:
+      - name: model
+        tests: [not_null, unique]
+      - name: question_coverage_pct
+        tests: [not_null]

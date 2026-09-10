@@ -1,0 +1,7 @@
+triv_ia:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: ../gold/benchmark.duckdb
+      threads: 4
