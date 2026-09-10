@@ -99,6 +99,36 @@ python src/enrichment/build_answers.py --model <id-modele-lm-studio> --slug <nom
 
 Sortie : `silver/answers/<nom-dossier>/answers.parquet`
 
+## Gold (dbt + DuckDB)
+
+Transforme le silver en tables métier du benchmark (`gold/benchmark.duckdb`).  
+Pourquoi dbt / DuckDB / staging vs marts : voir [`dbt/README.md`](dbt/README.md).
+
+Prérequis silver : `questions.parquet` + au moins un `silver/answers/<slug>/answers.parquet`.
+
+```bash
+source .venv/bin/activate   # depuis la racine du repo (sinon dbt introuvable)
+cd dbt
+
+# verifier la connexion
+dbt debug --profiles-dir .
+
+# construire / reconstruire le gold depuis le silver actuel
+dbt run --profiles-dir .
+
+# tests de qualité (not_null, unicité, etc.)
+dbt test --profiles-dir .
+
+# force drop + recreate si besoin
+# dbt run --profiles-dir . --full-refresh
+```
+
+Tables dans `gold/benchmark.duckdb` :
+- staging : `stg_questions`, `stg_answers`
+- marts : `mart_perf_by_model`, `mart_perf_by_prompt`, `mart_perf_by_category`, `mart_perf_by_difficulty`, `mart_coverage`
+
+La base est régénérable (non versionnée). Un nouveau parquet sous `silver/answers/<slug>/` est pris en compte au prochain `dbt run`.
+
 ## Arborescence (état actuel)
 
 ```
@@ -107,6 +137,8 @@ silver/questions.parquet
 silver/prompts.parquet
 silver/prompt_templates.yaml
 silver/answers/nemotron/answers.parquet
+dbt/
+gold/benchmark.duckdb
 src/scraping/scrape_opentbd.py
 src/enrichment/build_questions.py
 src/enrichment/build_prompts.py

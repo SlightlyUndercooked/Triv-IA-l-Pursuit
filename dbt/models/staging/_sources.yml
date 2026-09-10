@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: silver
+    description: >
+      Parquets silver du repo. Lus en read_parquet depuis le staging
+      (chemins relatifs ../silver/..., donc lancer dbt depuis dbt/).
+    tables:
+      - name: questions
+        description: silver/questions.parquet
+      - name: answers
+        description: silver/answers/*/answers.parquet ( tous les modèles)
