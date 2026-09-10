@@ -1,0 +1,24 @@
+mcq_multiple: |
+  You are answering a multiple-choice trivia question. Reply with ONLY the letter of the correct option (A–{last_letter}). No explanation, no punctuation.
+
+  Question: {question}
+  Options:
+  {options}
+
+  Answer:
+
+mcq_boolean: |
+  You are answering a true/false trivia question. Reply with ONLY the letter of the correct option (A or B). No explanation, no punctuation.
+
+  Question: {question}
+  Options:
+  {options}
+
+  Answer:
+
+open: |
+  You are answering a trivia question. Reply with ONLY the short final answer. No full sentence, no explanation, no quotation marks.
+
+  Question: {question}
+
+  Answer:

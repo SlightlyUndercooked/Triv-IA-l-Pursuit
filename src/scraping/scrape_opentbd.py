@@ -1,19 +1,28 @@
+"""Scrape OpenTDB → bronze/questions_raw.csv."""
+
+from __future__ import annotations
+
 import csv
-import json
-import time
 import html
+import json
 import logging
-from pathlib import Path
+import os
+import time
+import urllib3
 from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import unquote
 
 import requests
 
+ROOT = Path(__file__).resolve().parents[2]
+BRONZE_DIR = ROOT / "bronze"
+OUTPUT_PATH = BRONZE_DIR / "questions_raw.csv"
+PROGRESS_PATH = BRONZE_DIR / ".scrape_progress.json"
+
 BASE_URL = "https://opentdb.com"
 RATE_LIMIT_SECONDS = 5.1
 AMOUNT_PER_REQUEST = 50
-OUTPUT_PATH = Path(__file__).parent / "questions_raw.csv"
-PROGRESS_PATH = Path(__file__).parent / ".scrape_progress.json"
 
 CSV_FIELDS = [
     "category",
@@ -29,9 +38,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 session = requests.Session()
+if os.environ.get("SCRAPE_INSECURE", "").lower() in {"1", "true", "yes"}:
+    session.verify = False
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    logger.warning("SCRAPE_INSECURE actif: vérification SSL désactivée")
 
 
-def wait():
+def wait() -> None:
     time.sleep(RATE_LIMIT_SECONDS)
 
 
@@ -67,7 +80,10 @@ def fetch_questions(category_id: int, token: str, max_retries: int = 5) -> tuple
             wait_time = min(5 * attempt, 30)
             logger.warning(
                 "Erreur réseau (%s), tentative %d/%d, pause %ds",
-                e, attempt, max_retries, wait_time,
+                e,
+                attempt,
+                max_retries,
+                wait_time,
             )
             time.sleep(wait_time)
             continue
@@ -108,7 +124,7 @@ def scrape_category(category_id: int, category_name: str) -> list[dict]:
     token = request_session_token()
     wait()
 
-    rows = []
+    rows: list[dict] = []
 
     while True:
         code, results = fetch_questions(category_id, token)
@@ -139,12 +155,14 @@ def load_completed_ids() -> set[int]:
     return set(json.loads(PROGRESS_PATH.read_text()))
 
 
-def mark_completed(category_id: int, completed: set[int]):
+def mark_completed(category_id: int, completed: set[int]) -> None:
     completed.add(category_id)
     PROGRESS_PATH.write_text(json.dumps(sorted(completed)))
 
 
-def main():
+def main() -> None:
+    BRONZE_DIR.mkdir(parents=True, exist_ok=True)
+
     categories = get_categories()
     logger.info("Nombre de catégories trouvées: %d", len(categories))
 
