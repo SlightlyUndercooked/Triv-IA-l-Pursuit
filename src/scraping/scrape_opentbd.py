@@ -1,28 +1,19 @@
-"""Scrape OpenTDB → bronze/questions_raw.csv."""
-
-from __future__ import annotations
-
 import csv
-import html
 import json
-import logging
-import os
 import time
-import urllib3
-from datetime import datetime, timezone
+import html
+import logging
 from pathlib import Path
+from datetime import datetime, timezone
 from urllib.parse import unquote
 
 import requests
 
-ROOT = Path(__file__).resolve().parents[2]
-BRONZE_DIR = ROOT / "bronze"
-OUTPUT_PATH = BRONZE_DIR / "questions_raw.csv"
-PROGRESS_PATH = BRONZE_DIR / ".scrape_progress.json"
-
 BASE_URL = "https://opentdb.com"
 RATE_LIMIT_SECONDS = 5.1
 AMOUNT_PER_REQUEST = 50
+OUTPUT_PATH = Path(__file__).parent / "questions_raw.csv"
+PROGRESS_PATH = Path(__file__).parent / ".scrape_progress.json"
 
 CSV_FIELDS = [
     "category",
@@ -38,66 +29,61 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 session = requests.Session()
-if os.environ.get("SCRAPE_INSECURE", "").lower() in {"1", "true", "yes"}:
-    session.verify = False
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    logger.warning("SCRAPE_INSECURE actif: vérification SSL désactivée")
 
 
-def wait() -> None:
+def wait():
     time.sleep(RATE_LIMIT_SECONDS)
 
 
-def get_categories() -> list[dict]:
-    resp = session.get(f"{BASE_URL}/api_category.php", timeout=10)
-    resp.raise_for_status()
-    return resp.json()["trivia_categories"]
-
-
-def request_session_token() -> str:
-    resp = session.get(
-        f"{BASE_URL}/api_token.php", params={"command": "request"}, timeout=10
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if data["response_code"] != 0:
-        raise RuntimeError(f"Impossible d'obtenir un session token: {data}")
-    return data["token"]
-
-
-def fetch_questions(category_id: int, token: str, max_retries: int = 5) -> tuple[int, list[dict]]:
-    params = {
-        "amount": AMOUNT_PER_REQUEST,
-        "category": category_id,
-        "token": token,
-        "encode": "url3986",
-    }
-
+def api_get(path: str, params: dict | None = None, max_retries: int = 5) -> dict:
     for attempt in range(1, max_retries + 1):
         try:
-            resp = session.get(f"{BASE_URL}/api.php", params=params, timeout=15)
+            resp = session.get(f"{BASE_URL}{path}", params=params, timeout=15)
         except requests.exceptions.RequestException as e:
             wait_time = min(5 * attempt, 30)
             logger.warning(
-                "Erreur réseau (%s), tentative %d/%d, pause %ds",
-                e,
-                attempt,
-                max_retries,
-                wait_time,
+                "Erreur réseau sur %s (%s), tentative %d/%d, pause %ds",
+                path, e, attempt, max_retries, wait_time,
             )
             time.sleep(wait_time)
             continue
 
         if resp.status_code == 429:
-            logger.warning("Rate limit atteint (429), pause supplémentaire de 5s")
+            logger.warning("Rate limit atteint (429) sur %s, pause supplémentaire de 5s", path)
             time.sleep(5)
             continue
 
         resp.raise_for_status()
-        data = resp.json()
-        return data["response_code"], data.get("results", [])
+        return resp.json()
 
-    raise RuntimeError(f"Échec après {max_retries} tentatives pour la catégorie {category_id}")
+    raise RuntimeError(f"Échec après {max_retries} tentatives sur {path}")
+
+
+def get_categories() -> list[dict]:
+    return api_get("/api_category.php")["trivia_categories"]
+
+
+def request_session_token() -> str:
+    data = api_get("/api_token.php", params={"command": "request"})
+    if data["response_code"] != 0:
+        raise RuntimeError(f"Impossible d'obtenir un session token: {data}")
+    return data["token"]
+
+
+def get_category_count(category_id: int) -> int:
+    data = api_get("/api_count.php", params={"category": category_id})
+    return data["category_question_count"]["total_question_count"]
+
+
+def fetch_questions(category_id: int, token: str, amount: int) -> tuple[int, list[dict]]:
+    params = {
+        "amount": amount,
+        "category": category_id,
+        "token": token,
+        "encode": "url3986",
+    }
+    data = api_get("/api.php", params=params)
+    return data["response_code"], data.get("results", [])
 
 
 def decode_url3986(value: str) -> str:
@@ -121,30 +107,55 @@ def normalize_question(raw: dict, category_name: str) -> dict:
 def scrape_category(category_id: int, category_name: str) -> list[dict]:
     logger.info("Catégorie: %s (id=%s)", category_name, category_id)
 
+    expected_total = get_category_count(category_id)
+    wait()
+    logger.info("  Total attendu d'après l'API: %d", expected_total)
+
     token = request_session_token()
     wait()
 
-    rows: list[dict] = []
+    rows = []
+    amount = min(AMOUNT_PER_REQUEST, expected_total)
 
-    while True:
-        code, results = fetch_questions(category_id, token)
+    while len(rows) < expected_total and amount > 0:
+        code, results = fetch_questions(category_id, token, amount)
 
         if code == 0:
             rows.extend(normalize_question(raw, category_name) for raw in results)
-            logger.info("  +%d questions (total catégorie: %d)", len(results), len(rows))
+            logger.info("  +%d questions (total catégorie: %d/%d)", len(results), len(rows), expected_total)
             wait()
-
-        elif code == 4:
-            logger.info("  Catégorie épuisée, %d questions au total", len(rows))
-            break
+            remaining = expected_total - len(rows)
+            amount = min(AMOUNT_PER_REQUEST, remaining)
 
         elif code == 1:
+            # le compte attendu peut être légèrement désynchronisé (questions
+            # ajoutées/retirées côté API entre-temps) : on retente avec une
+            # taille de paquet plus petite plutôt que d'abandonner
+            if amount > 1:
+                amount = max(amount // 2, 1)
+                logger.info("  Code 1, on retente avec amount=%d", amount)
+                wait()
+                continue
             logger.info("  Plus de questions disponibles pour cette catégorie")
+            break
+
+        elif code == 4:
+            logger.warning(
+                "  Token épuisé à %d/%d questions (attendu vs obtenu désynchronisés)",
+                len(rows), expected_total,
+            )
             break
 
         else:
             logger.error("  Code de réponse inattendu (%s), on passe à la suite", code)
             break
+
+    if len(rows) < expected_total:
+        logger.warning(
+            "  Catégorie incomplète: %d/%d questions récupérées", len(rows), expected_total
+        )
+    else:
+        logger.info("  Catégorie complète: %d questions", len(rows))
 
     return rows
 
@@ -155,14 +166,12 @@ def load_completed_ids() -> set[int]:
     return set(json.loads(PROGRESS_PATH.read_text()))
 
 
-def mark_completed(category_id: int, completed: set[int]) -> None:
+def mark_completed(category_id: int, completed: set[int]):
     completed.add(category_id)
     PROGRESS_PATH.write_text(json.dumps(sorted(completed)))
 
 
-def main() -> None:
-    BRONZE_DIR.mkdir(parents=True, exist_ok=True)
-
+def main():
     categories = get_categories()
     logger.info("Nombre de catégories trouvées: %d", len(categories))
 
