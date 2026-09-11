@@ -129,6 +129,20 @@ Tables dans `gold/benchmark.duckdb` :
 
 La base est régénérable (non versionnée). Un nouveau parquet sous `silver/answers/<slug>/` est pris en compte au prochain `dbt run`.
 
+## Dashboard Streamlit
+
+Visualise les marts gold (`mart_perf_*`, `mart_coverage`) via l’app dans `app/streamlit_app.py`.
+
+Prérequis : `gold/benchmark.duckdb` déjà généré (`dbt run` ci-dessus).
+
+```bash
+source .venv/bin/activate
+streamlit run app/streamlit_app.py
+```
+
+Ouvre ensuite l’URL affichée (souvent http://localhost:8501).  
+Sans activer le venv : `.venv/bin/streamlit run app/streamlit_app.py`.
+
 ## Arborescence (état actuel)
 
 ```
@@ -139,6 +153,7 @@ silver/prompt_templates.yaml
 silver/answers/nemotron/answers.parquet
 dbt/
 gold/benchmark.duckdb
+app/streamlit_app.py
 src/scraping/scrape_opentbd.py
 src/enrichment/build_questions.py
 src/enrichment/build_prompts.py
